@@ -1,0 +1,153 @@
+<!DOCTYPE html> 
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hand Tracker</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospace; display: flex; height: 100vh; }
+
+    #left { position: relative; width: 640px; flex-shrink: 0; }
+    video, canvas { position: absolute; top: 0; left: 0; width: 640px; height: 480px; }
+    video { transform: scaleX(-1); }
+
+    #right { flex: 1; padding: 20px; overflow-y: auto; background: #111; border-left: 1px solid #222; }
+    h2 { color: #00ff88; margin-bottom: 12px; font-size: 14px; letter-spacing: 2px; }
+    
+    .landmark-row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #1a1a1a; font-size: 12px; }
+    .lm-name { color: #888; width: 140px; }
+    .lm-val { color: #00ff88; }
+
+    #fingers { display: flex; gap: 8px; margin-bottom: 16px; }
+    .finger-badge { padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+    .finger-up { background: #00ff8833; color: #00ff88; border: 1px solid #00ff88; }
+    .finger-down { background: #ff333322; color: #ff3333; border: 1px solid #ff3333; }
+
+    #status { position: absolute; bottom: 8px; left: 8px; font-size: 11px; color: #555; }
+  </style>
+</head>
+<body>
+
+<div id="left">
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas" width="640" height="480"></canvas>
+  <div id="status">Initializing...</div>
+</div>
+
+<div id="right">
+  <h2>▸ FINGER STATE</h2>
+  <div id="fingers"></div>
+
+  <h2>▸ LANDMARKS (x, y, z)</h2>
+  <div id="landmarks"></div>
+</div>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const landmarksEl = document.getElementById('landmarks');
+  const fingersEl = document.getElementById('fingers');
+
+  // Landmark names from MediaPipe
+  const LANDMARK_NAMES = [
+    'WRIST',
+    'THUMB_CMC','THUMB_MCP','THUMB_IP','THUMB_TIP',
+    'INDEX_MCP','INDEX_PIP','INDEX_DIP','INDEX_TIP',
+    'MIDDLE_MCP','MIDDLE_PIP','MIDDLE_DIP','MIDDLE_TIP',
+    'RING_MCP','RING_PIP','RING_DIP','RING_TIP',
+    'PINKY_MCP','PINKY_PIP','PINKY_DIP','PINKY_TIP'
+  ];
+
+  const FINGER_TIPS = { Thumb: 4, Index: 8, Middle: 12, Ring: 16, Pinky: 20 };
+  const FINGER_MCP  = { Thumb: 2, Index: 5, Middle: 9,  Ring: 13, Pinky: 17 };
+
+  function isFingerUp(landmarks, tip, mcp, handedness) {
+    if (tip === 4) {
+      // Thumb logic flips between hands (also account for mirror)
+      return handedness === 'Left'
+        ? landmarks[tip].x > landmarks[mcp].x
+        : landmarks[tip].x < landmarks[mcp].x;
+    }
+    return landmarks[tip].y < landmarks[mcp].y;
+  }
+
+  function onResults(results) {
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1); // mirror to match video
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      const landmarks = results.multiHandLandmarks[0]; // first hand
+
+      // Draw skeleton
+      drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00ff8866', lineWidth: 2 });
+      drawLandmarks(ctx, landmarks, { color: '#00ff88', lineWidth: 1, radius: 4 });
+
+      ctx.restore();
+
+      statusEl.textContent = `✓ Hand detected — ${landmarks.length} landmarks`;
+
+      // --- Finger states ---
+      const handLabel = results.multiHandedness[0].label; // 'Left' or 'Right'
+      fingersEl.innerHTML = Object.entries(FINGER_TIPS).map(([name, tip]) => {
+        const up = isFingerUp(landmarks, tip, FINGER_MCP[name], handLabel);
+        return `<span class="finger-badge ${up ? 'finger-up' : 'finger-down'}">${name} ${up ? '▲' : '▼'}</span>`;
+      }).join('');
+
+      // --- Landmark table ---
+      landmarksEl.innerHTML = landmarks.map((lm, i) => `
+        <div class="landmark-row">
+          <span class="lm-name">${i}. ${LANDMARK_NAMES[i]}</span>
+          <span class="lm-val">
+            x: ${lm.x.toFixed(3)} &nbsp;
+            y: ${lm.y.toFixed(3)} &nbsp;
+            z: ${lm.z.toFixed(3)}
+          </span>
+        </div>
+      `).join('');
+
+    } else {
+      ctx.restore();
+      statusEl.textContent = 'No hand detected';
+      fingersEl.innerHTML = '';
+      landmarksEl.innerHTML = '';
+    }
+  }
+
+  // Init MediaPipe Hands
+  const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.5
+  });
+
+  hands.onResults(onResults);
+
+  // Start webcam
+  const camera = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 640,
+    height: 480
+  });
+
+  camera.start().then(() => {
+    statusEl.textContent = 'Camera running...';
+  }).catch(err => {
+    statusEl.textContent = 'Camera error: ' + err.message;
+  });
+</script>
+</body>
+</html>

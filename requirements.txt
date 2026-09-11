@@ -1,0 +1,7 @@
+# Requires Python 3.12 — see README.
+# mediapipe's legacy mp.solutions API (used by bridge.py) only ships in
+# wheels for Python 3.9-3.12. The 3.13/3.14 wheels contain only the newer
+# Tasks API, so bridge.py cannot run on them.
+opencv-python==4.11.0.86
+mediapipe==0.10.21
+pyserial==3.5

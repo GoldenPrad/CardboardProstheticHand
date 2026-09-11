@@ -1,0 +1,6 @@
+handtracker/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
